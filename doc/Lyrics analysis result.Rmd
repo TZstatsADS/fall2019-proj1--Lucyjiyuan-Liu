@@ -1,0 +1,198 @@
+---
+title: "Lexical density analysis of lyrics"
+author: "Jiyuan Liu"
+runtime: shiny
+output:
+  html_document:
+    df_print: paged
+---
+"lyrics_filter.csv" is a filtered corpus of 380,000+ song lyrics from from MetroLyrics. You can read more about it on [Kaggle](https://www.kaggle.com/gyani95/380000-lyrics-from-metrolyrics).
+
+In this project, I used a measure called "Lexical Density" to analyze lyrics in different genre, times and from different artists.
+
+### Load all the required libraries
+
+From the packages' descriptions:
+
++ `tidyverse` is an opinionated collection of R packages designed for data science. All packages share an underlying design philosophy, grammar, and data structures;
++ `tidytext` allows text mining using 'dplyr', 'ggplot2', and other tidy tools;
++ `plotly` allows plotting interactive graphs;
++ `DT` provides an R interface to the JavaScript library DataTables;
++ `tm` is a framework for text mining applications within R;
++ `scales` map data to aesthetics, and provide methods for automatically determining breaks and labels for axes and legends;
++ `data.table` is a package for fast aggregation of large data;
++ `wordcloud2` provides an HTML5 interface to wordcloud for data visualization;
++ `gridExtra` contains miscellaneous functions for "grid" graphics;
++ `ngram` is for constructing n-grams (“tokenizing”), as well as generating new text based on the n-gram structure of a given text input (“babbling”);
++ `quanteda` is a fast, flexible, and comprehensive framework for quantitative text analysis in R;
++ `ggplot2` is a system for 'declaratively' creating graphics, based on "The Grammar of Graphics". ;
++ `Shiny` is an R package that makes it easy to build interactive web apps straight from R;
+
+```{r}
+library(tidyverse)
+library(tidytext)
+library(plotly)
+library(DT)
+library(tm)
+library(data.table)
+library(scales)
+library(wordcloud2)
+library(gridExtra)
+library(ngram)
+library(quanteda)
+library(ggplot2)
+library(shiny) 
+```
+
+```{r}
+load('~/Desktop/5243/Project 1/output/processed_lyrics.RData') 
+```
+
+Type-token ratio
+
+The number of words in a text is often referred to as the number of tokens. However, several of these tokens are repeated. 
+```{r}
+lyrics_1<-dt_lyrics%>%
+  filter(id==3000)
+lyrics_1$stemmedwords
+```
+
+For example, the token sea occurs two times, the token strike occurs three times, and the token age occurs once. 
+
+```{r}
+corpus <- VCorpus(VectorSource(lyrics_1$stemmedwords))
+word_collect <- tidy(corpus) %>%
+  select(text) %>%
+  unnest_tokens(word, text) %>%
+  count(word) 
+word_collect%>%
+  arrange(desc(n))
+word_collect%>%
+  summarise(sum(n))
+```
+
+We see, then, that of the total of 65 tokens in this text there are 57 so-called types. The relationship between the number of types and the number of tokens is known as the type-token ratio (TTR). The more types there are in comparison to the number of tokens, then the more varied is the vocabulary, i.e. it there is greater lexical diversity.
+
+### Calculate Type-token ratio (TTR)
+Here, I use the function textstat_lexdiv() in the `quanteda` package to calculate stemmedwords.
+
+```{r}
+dt_lyrics <- dt_lyrics %>%
+  filter(year >= 1970)
+
+TTR <- dfm(dt_lyrics$stemmedwords) %>% 
+  textstat_lexdiv(measure = "TTR")
+
+dt_lyrics$TTR <- TTR$TTR *100
+```
+
+### Discussion of TTR of different genre
+
+```{r}
+genre_ttr<-dt_lyrics %>%
+  group_by(genre) %>%
+  summarise(TTR_mean = mean(TTR))
+
+genre_ttr%>%
+  arrange(desc(TTR_mean))
+```
+
+
+We can see from the result that Metal and Hip-Hop songs tend to have more diversity in their lyrics, while Pop, R&B have less diversity, which implies that there is more repetition in Pop music than Metal. 
+
+```{r}
+## Recoder the genre in descending TTR order
+dt_lyrics$genre_ordered <- reorder(dt_lyrics$genre,dt_lyrics$TTR,FUN = mean)
+
+ggplot(dt_lyrics, aes(genre_ordered, TTR,color=genre_ordered)) +
+  geom_boxplot() +
+  coord_flip()
+```
+
+
+
+From this ggplot, we can get a more clear picture of the distibution of lexical diversity of different genre. While Electronic, Pop and R&B music have similar TTR mean, Electronic have larger deviation. For Hip-Hop and Country music, the lyrics have more diversity and small deviation in TTR.
+
+### Discussion of TTR of different times
+
+```{r}
+year_ttr<-dt_lyrics %>%
+  group_by(year) %>%
+  summarise(TTR_mean_year = mean(TTR))
+
+ggplot(year_ttr,aes(x=year,y=TTR_mean_year)) +
+  geom_line()
+```
+
+
+
+From the plot of TTR in different years, we can't see a very clear trend whether TTR was inceasing or decreasing during the past years. However, it shows that TTR in recent 10 year deceased rapidly.
+
+To have a more clear picture of the distribution of TTR of different times, I grouped the lyrics into different centuries.
+```{r}
+dt_lyrics$century <- paste(as.integer(substr(dt_lyrics$year,1,3))*10,"s",sep="")
+
+ggplot(dt_lyrics, aes(century, TTR,color=dt_lyrics$century)) +
+  geom_boxplot() + 
+  labs(title="Distribution of TTR of different centries")
+```
+
+
+
+From this boxplot of distribution of TTR of different centries, the deviations of TTR of different centuries do not show much difference. At the same time, the mean of TTR of recent 10 years clearly drops, while it slowly incearsed from 1970s to 2000s.
+
+### Changes of some genres thourgh the years
+```{r}
+genre_year_ttr<-dt_lyrics %>%
+  filter(genre %in% c("Metal","Hip-Hop","Country","Pop",
+                      "R&B","Electronic","Folk","Jazz",
+                      "Rock")) %>%
+  group_by(year,genre) %>%
+  summarise(TTR_mean = mean(TTR))
+
+ggplot(genre_year_ttr, aes(x=year,y=TTR_mean,color=genre)) +
+  geom_line() +
+  facet_wrap(~genre,scales="free_y")
+```
+
+
+
+Similar as the result shown in the TTR of different times, there is clear decease in TTR in all genres in recent years.
+
+### TTR of different artist
+```{r}
+artist_ttr<-dt_lyrics %>%
+  group_by(artist) %>%
+  summarise(TTR_mean = round(mean(TTR),6),
+            TTR_sd = round(sd(TTR),6))
+
+ui <- navbarPage(strong("Lexical density analysis of an artist"),
+                   tabPanel("Overview", 
+                        DT::dataTableOutput("table"))
+                 )
+server <- function(input, output) {
+  output$table <- DT::renderDataTable({
+    artist_ttr<-dt_lyrics %>%
+  group_by(artist) %>%
+  summarise(TTR_mean = round(mean(TTR),6),
+            TTR_sd = round(sd(TTR),6))
+        DT::datatable(artist_ttr)
+       })
+   } 
+shinyApp(ui, server)
+```
+
+### TTR of different artist
+```{r}
+artist_ttr<-dt_lyrics %>%
+  filter(artist == "adele") 
+
+
+ggplot(artist_ttr, aes(x=year,y=TTR,color=artist)) +
+  geom_point() +
+  facet_wrap(~artist)
+```
+
+With more information, for example, the popularity throught out an artist's career. We would get some kind of association between lexical diversity and popularity of a song.
+
+Reference: https://www.sltinfo.com/type-token-ratio/
